@@ -1,95 +1,135 @@
 const path = require("path");
 const express = require("express");
-const hbs = require("hbs");
-const geocode = require('./utils/geocode');
-const forecast = require('./utils/forecast');
+const fs = require("fs");
+
+
 const app = express();
 
-// Define path for express config
-const publicDirectoryPath = path.join(__dirname, "../public");
-const viewsPath = path.join(__dirname, "../templates/views");
-const partialsPath = path.join(__dirname, "../templates/partials");
+app.use(express.urlencoded({ extended: false }));
+app.use(express.json());
 
-//Setup handlebars engine and views location
-app.set("view engine", "hbs");
-app.set("views", viewsPath);
-hbs.registerPartials(partialsPath);
 
-// Setup  static directory to serve
-app.use(express.static(publicDirectoryPath));
 
-app.get("", (req, res) => {
-  res.render("index", {
-    title: "Weather",
-    name: "Evgeni Bershadsky",
-  });
-});
-app.get("/about", (req, res) => {
-  res.render("about", {
-    title: "About me",
-    name: "Evgeni Bershadsky",
-  });
-});
-app.get("/help", (req, res) => {
-  res.render("help", {
-    title: "Help",
-    helpText: "This is some helpfull text!",
-    name: "Evgeni Bershadsky",
-  });
-});
-
-app.get("/weather", (req, res) => {
-  if (!req.query.address) {
-       return res.send({
-        error: "You must provide an address",
-       }) 
+app.get("/quiz/results/:username", (req, res) => {
+  try{
+    const usernameSelector = require(`./${req.params.username}.json`);
+    res.json(usernameSelector); 
   }
-  geocode(req.query.addres , (error ,{latitude , longitude , location} ={} ) =>{
-    if (error) {
-      return res.send({error})
-    } 
-    forecast(latitude , longitude , (error , forecastData)=>{
-      if (error) {
-        return res.send({error})
-      } 
-      res.send({
-        forecast:forecastData,
-        location,
-        address: req.query.address,
-      });
-
-    })
-  })
-
+  catch{
+    res.status(400).json({ msg: `cant find ${req.params.username}` });
+  }
 });
 
-app.get("/products", (req, res) => {
-  if (!req.query.search) {
-  return  res.send({
-      error: "You must provide a search term",
+//quiz answer by friend
+app.post("/quiz/results/:username/:quizname/answer", (req, res) => {
+  const answer = {
+    username:req.body.username,
+    answers: req.body.answers,
+  };
+
+  const usernamePath = `./${req.params.username}.json`
+  console.log(usernamePath);
+
+  //if the path is correct update the new answer
+  if(fs.existsSync(usernamePath)){
+    const usernameSelector = require(`./${req.params.username}.json`);
+    usernameSelector[req.params.quizname] ? usernameSelector[req.params.quizname].push(answer) : usernameSelector[req.params.quizname] = [answer];
+    fs.writeFile(usernamePath, JSON.stringify(usernameSelector), function (
+      err
+    ) {
+      if (err) {
+        return console.log(err);
+      }
+      console.log("The file was Updated");
     });
   }
-  res.send({
-    products: [],
-  });
+  else{
+    console.log("Ops, cant find the file");
+  }
 });
 
-app.get("/help/*", (req, res) => {
-  res.render("404", {
-    title: "404",
-    name: "Evgeni Bershadsky",
-    errorMessage: "Help not Found",
-  });
+//quiz score
+app.get("/quiz/results/:username/:quizname/summary/:friendanswer", (req, res) => {
+  const usernameSelector = require(`./${req.params.username}.json`);
+  let score = 0;
+  let friendAnswer = [];
+  let userAnswer = [];
+  let spesificFriendAnswer = usernameSelector[req.params.quizname];
+  for(const value in spesificFriendAnswer){
+    if(spesificFriendAnswer[value].username === req.params.friendanswer){
+      friendAnswer = spesificFriendAnswer[value].answers;
+    }
+  }
+
+  for(const value in usernameSelector.answers){
+    if(usernameSelector.answers[value].quizname === req.params.quizname){
+      userAnswer = usernameSelector.answers[value].answers;
+    }
+  }
+
+  for(const answer in userAnswer){
+    if(userAnswer[answer] === friendAnswer[answer]){
+      score+=1;
+    }
+  }
+
+  res.json({msg:`score ${score}/${userAnswer.length}`})
 });
 
-app.get("*", (req, res) => {
-  res.render("404", {
-    title: "404",
-    name: "Evgeni Bershadsky",
-    errorMessage: "Page not Found",
-  });
+//add new quiz username 
+app.post("/", function (req, res) {
+  const newMember = {
+    username:req.body.username,
+    name: req.body.name,
+    answers:[],
+    id: Math.floor(Math.random() * 99999) + 100,
+  };
+
+  //file not exists - no username with this name
+  const usernamePath = `./${req.body.username}.json`
+  if(!fs.existsSync(usernamePath)){
+    fs.writeFile(`${newMember.username}.json`, JSON.stringify(newMember), function (
+      err
+    ) {
+      if (err) {
+        return console.log(err);
+      }
+      console.log("The file was saved!");
+    });
+  }
+  else{
+    console.log("username already taken, pick another one");
+  }
 });
+
+
+//create new quiz and update profile
+app.post("/quiz/:username/create", function (req, res) {
+  const quiz = {
+    quizname:req.body.quizname,
+    answers: req.body.answers,
+  };
+
+  const usernamePath = `./${req.params.username}.json`
+  if(fs.existsSync(usernamePath)){
+    const usernameSelector = require(`./${req.params.username}.json`);
+    usernameSelector.answers.push(quiz)
+    fs.writeFile(usernamePath, JSON.stringify(usernameSelector), function (
+      err
+    ) {
+      if (err) {
+        return console.log(err);
+      }
+      console.log("The file update");
+    });
+  }
+  else{
+    console.log("somwthing wrong");
+  }
+});
+
+
 
 app.listen(3000, () => {
-  console.log("Server is up on port 3000");
+  console.log("Server is up on port 3000.");
 });
